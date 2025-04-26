@@ -9,9 +9,7 @@ The behavior of these locks is similar to their counterparts in [`std::sync`][ST
 - Threads encountering an unavailable lock will busy-wait in a loop until it's available, without yielding.
 
 ## Usage
-```console
-cargo add skirt
-```
+`todo!()`
 
 | Primitive                                      | Description                                                     |
 |:-----------------------------------------------|:----------------------------------------------------------------|
