@@ -18,7 +18,7 @@ use core::ops::{Deref, DerefMut};
 /// [`try_lock`]: Self::try_lock
 ///
 /// # Examples
-pub struct Mutex<T: ?Sized, const BACKOFF: usize = 10> {
+pub struct Mutex<T: ?Sized> {
     lock: AtomicBool,
     data: UnsafeCell<T>,
 }
@@ -76,7 +76,7 @@ impl<T> Mutex<T> {
     }
 }
 
-impl<T: ?Sized, const BACKOFF: usize> Mutex<T, BACKOFF> {
+impl<T: ?Sized> Mutex<T> {
     /// Acquires a mutex, blocking the current thread until it is able to do so.
     ///
     /// # Examples
@@ -93,7 +93,7 @@ impl<T: ?Sized, const BACKOFF: usize> Mutex<T, BACKOFF> {
     /// }).join().expect("thread::spawn failed");
     /// assert_eq!(*mutex.lock(), 10);
     /// ```
-    pub fn lock(&self) -> MutexGuard<'_, T, BACKOFF> {
+    pub fn lock(&self) -> MutexGuard<'_, T> {
         #[cfg(feature = "std")]
         let mut tries = 0;
 
@@ -101,7 +101,7 @@ impl<T: ?Sized, const BACKOFF: usize> Mutex<T, BACKOFF> {
             core::hint::spin_loop();
 
             #[cfg(feature = "std")]
-            match tries >= BACKOFF {
+            match tries >= 10 {
                 true => std::thread::yield_now(),
                 false => tries += 1,
             }
@@ -110,8 +110,25 @@ impl<T: ?Sized, const BACKOFF: usize> Mutex<T, BACKOFF> {
         MutexGuard::new(self)
     }
 
-    pub fn lock_weak(&self) -> MutexGuard<'_, T, BACKOFF> {
-        todo!()
+    pub fn lock_weak(&self) -> MutexGuard<'_, T> {
+        #[cfg(feature = "std")]
+        let mut tries = 0;
+
+        while self
+            .lock
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            core::hint::spin_loop();
+
+            #[cfg(feature = "std")]
+            match tries >= 10 {
+                true => std::thread::yield_now(),
+                false => tries += 1,
+            }
+        }
+
+        MutexGuard::new(self)
     }
 
     /// Attempts to acquire this lock.
@@ -142,7 +159,7 @@ impl<T: ?Sized, const BACKOFF: usize> Mutex<T, BACKOFF> {
     /// assert_eq!(*mutex.lock(), 10);
     /// ```
     #[must_use]
-    pub fn try_lock(&self) -> Option<MutexGuard<'_, T, BACKOFF>> {
+    pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
         self.lock
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
@@ -222,18 +239,18 @@ impl<T: ?Sized + Debug> Debug for Mutex<T> {
 ///
 /// [`lock`]: Mutex::lock
 /// [`try_lock`]: Mutex::try_lock
-pub struct MutexGuard<'m, T: ?Sized, const BACKOFF: usize = 10> {
-    mutex: &'m Mutex<T, BACKOFF>,
+pub struct MutexGuard<'m, T: ?Sized> {
+    mutex: &'m Mutex<T>,
     #[cfg(not(feature = "nightly"))]
     phantom: core::marker::PhantomData<*const ()>,
 }
 
 #[cfg(feature = "nightly")]
-impl<T: ?Sized, const BACKOFF: usize> !Send for MutexGuard<'_, T, BACKOFF> {}
+impl<T: ?Sized> !Send for MutexGuard<'_, T> {}
 unsafe impl<T: ?Sized + Sync> Sync for MutexGuard<'_, T> {}
 
-impl<'m, T: ?Sized, const BACKOFF: usize> MutexGuard<'m, T, BACKOFF> {
-    const fn new(mutex: &'m Mutex<T, BACKOFF>) -> Self {
+impl<'m, T: ?Sized> MutexGuard<'m, T> {
+    const fn new(mutex: &'m Mutex<T>) -> Self {
         Self {
             mutex,
             #[cfg(not(feature = "nightly"))]
@@ -258,7 +275,7 @@ impl<T: ?Sized> DerefMut for MutexGuard<'_, T> {
     }
 }
 
-impl<T: ?Sized, const BACKOFF: usize> Drop for MutexGuard<'_, T, BACKOFF> {
+impl<T: ?Sized> Drop for MutexGuard<'_, T> {
     #[inline]
     fn drop(&mut self) {
         self.mutex.lock.store(false, Ordering::Release);
